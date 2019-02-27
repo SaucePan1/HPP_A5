@@ -3,6 +3,7 @@
 #include <string.h>
 #include <time.h>
 #include <math.h>
+#include <pthread.h>
 
 #define POS_X  0
 #define POS_Y 1
@@ -29,6 +30,21 @@ typedef struct tree_node{
   struct tree_node *right_down; //Q4 child
   struct tree_node *right_up; //Q1 child
 }node_t;
+
+typedef struct thread_arg{
+  int thid;
+  int i1;
+  int i2;
+  double theta_max;
+  double G;
+  double delta_t;
+  double* pos_x;
+  double* pos_y;
+  double* vx;
+  double* vy;
+  node_t* node;
+}arg_t;
+
 void print_qtree(node_t* node){
   if(node == NULL){printf("Tree is empty \n"); return;}
 
@@ -235,41 +251,61 @@ void delete_tree(node_t** node){
   return;
 }
 
-void get_acc_on_body(double pos_x, double pos_y, node_t ** node, double theta_max, double G){
-    double x_direction = pos_x - (*node)->cm_x;
-    double y_direction = pos_y - (*node)->cm_y;
-    double dist_to_node = sqrt(x_direction*x_direction + y_direction*y_direction);
-    double tol= 1.0e-10; //
-    if((*node)->right_up == NULL && dist_to_node < tol){
-      return;
-    }
-    else if( (*node)->right_up && (*node)->width/dist_to_node > theta_max ){
-      if((*node)-> right_up->tot_mass>0)
-        get_acc_on_body(pos_x, pos_y, &(*node)->right_up, theta_max, G);
-      if( (*node)-> right_down->tot_mass>0)
-        get_acc_on_body(pos_x, pos_y, &(*node)->right_down, theta_max, G);
-      if((*node)-> left_up->tot_mass>0)
-        get_acc_on_body(pos_x, pos_y, &(*node)->left_up, theta_max, G);
-      if( (*node)-> left_down->tot_mass>0)
-        get_acc_on_body(pos_x, pos_y, &(*node)->left_down, theta_max, G);
-      return;
-    }
-    else{ // it's another leaf / it's an inner node that i can approximate
-      double denominator = (dist_to_node+epsilon_0)*(dist_to_node+epsilon_0)*(dist_to_node+epsilon_0);
-      //add to the global varaibles
-      total_acc_x += G* (*node)->tot_mass*x_direction/denominator;
-      total_acc_y += G* (*node)->tot_mass*y_direction/denominator;
-      return;
-    }
+void get_acc_on_body(double pos_x, double pos_y, node_t ** node, double theta_max, double G,
+  double* total_acc_x, double* total_acc_y){
+  double x_direction = pos_x - (*node)->cm_x;
+  double y_direction = pos_y - (*node)->cm_y;
+  double dist_to_node = sqrt(x_direction*x_direction + y_direction*y_direction);
+  double tol= 1.0e-10; //
+  if((*node)->right_up == NULL && dist_to_node < tol){
+    return;
+  }
+  else if( (*node)->right_up && (*node)->width/dist_to_node > theta_max ){
+    if((*node)-> right_up->tot_mass>0)
+      get_acc_on_body(pos_x, pos_y, &(*node)->right_up, theta_max, G, total_acc_x, total_acc_y);
+    if( (*node)-> right_down->tot_mass>0)
+      get_acc_on_body(pos_x, pos_y, &(*node)->right_down, theta_max, G, total_acc_x, total_acc_y);
+    if((*node)-> left_up->tot_mass>0)
+      get_acc_on_body(pos_x, pos_y, &(*node)->left_up, theta_max, G, total_acc_x, total_acc_y);
+    if( (*node)-> left_down->tot_mass>0)
+      get_acc_on_body(pos_x, pos_y, &(*node)->left_down, theta_max, G, total_acc_x, total_acc_y);
+    return;
+  }
+  else{ // it's another leaf / it's an inner node that i can approximate
+    double denominator = (dist_to_node+epsilon_0)*(dist_to_node+epsilon_0)*(dist_to_node+epsilon_0);
+    //add to the global varaibles
+    *total_acc_x += G* (*node)->tot_mass*x_direction/denominator;
+    *total_acc_y += G* (*node)->tot_mass*y_direction/denominator;
+    return;
+  }
+}
+void *  worker_get_acc(void* arg){
+  arg_t* myarg = (arg_t*)arg;
+  int i1 = myarg->i1;
+  int i2 = myarg->i2;
+  double* acc_x;
+  double* acc_y;
 
-
+  *acc_x =0;
+  *acc_y =0;
+  for(int i=i1; i <i2; i ++){
+        get_acc_on_body(myarg->pos_x[i], myarg->pos_y[i], &myarg->node, myarg->theta_max, myarg->G, acc_x, acc_y);
+        //printf("Acceleration on %d: (%lf , %lf ) \n", i+1, total_acc_x, total_acc_y);
+        myarg->vx[i] += myarg->delta_t  * (*acc_x);
+        myarg->vy[i] += myarg->delta_t  * (*acc_y);
+        myarg->pos_x[i] += myarg->delta_t * myarg->vx[i];
+        myarg->pos_y[i] += myarg->delta_t * myarg->vy[i];
+        *acc_x=0;
+        *acc_y=0;
+    }
+    pthread_exit((void*) myarg->thid);
   }
 
 int main(int argc, char *args[]){
 
-  if (argc!=7){
+  if (argc!=8){
     printf("Invalid number of arguments \n");
-    printf("galsim expects: N filename nsteps delta_t theta_max graphics\n");
+    printf("galsim expects: N filename nsteps delta_t theta_max graphics NUM_THREADS\n");
     return -1;
   }
   clock_t begin = clock();
@@ -280,6 +316,7 @@ int main(int argc, char *args[]){
   character to double, maybe a single cast would suffice */
   const double delta_t = atof(args[4]);
   const double theta_max = atof(args[5]);
+  const int NUM_THREADS = atoi(args[7]);
   const double G = -100/(double)N;
   //Read the file with initial conditions
   FILE *file;
@@ -295,8 +332,6 @@ int main(int argc, char *args[]){
   matrix statically*/
   double *ma = (double *)malloc(N*sizeof(double));
   double *bri = (double *)malloc(N*sizeof(double));
-
-
 
   for (int i = 0 ; i<(N) ; i++){
     double x , y , vx , vy , mass , bright;
@@ -334,7 +369,12 @@ int main(int argc, char *args[]){
   //printf("Printing tree .. \n");
   //print_qtree(root);
 
-  //Calculate forces
+  pthread_t thread[NUM_THREADS];
+  pthread_attr_t attr;
+  /* Initialize thread attr and set to JOINABLE*/
+  pthread_attr_init(&attr); //initializes thread attributes with default values
+  pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE); //set it to detached
+
   for (int k = 0 ; k<n_steps ; k++){
     node_t * root= (node_t*)malloc(sizeof(node_t));
     root->depth = 1;
@@ -346,29 +386,41 @@ int main(int argc, char *args[]){
     root->left_up = NULL;
     root->right_up=NULL;
     root->right_down=NULL;
-  //  printf("inserting nodes in the tree...\n");
+    // printf("inserting nodes in the tree...\n");
     int id_tar;
+    //Create tree for step K
     for(int i=0; i<N; i++){
       id_tar = i;
       insert(&root ,arr[i][POS_X], arr[i][POS_Y], ma[i], pow_2, id_tar);
     }
-    for(int i=0; i <N; i ++){
-      get_acc_on_body(arr[i][0], arr[i][1], &root, theta_max, G);
-    //  printf("Acceleration on %d: (%lf , %lf ) \n", i+1, total_acc_x, total_acc_y);
-      arr[i][2] += delta_t  * total_acc_x;
-      arr[i][3] += delta_t  * total_acc_y;
-      arr[i][0] += delta_t * arr[i][2];
-      arr[i][1] += delta_t * arr[i][3];
-      total_acc_x=0;
-      total_acc_y=0;
-    }
+    //Start threads
+    int rc;
+    int t;
+    for(t=0; t<NUM_THREADS; t++) {
+       printf("Main: creating thread %d\n", t);
+       rc = pthread_create(&thread[t], &attr, worker_get_acc, (void *)t);
+       if (rc) {
+          printf("ERROR; return code from pthread_create() is %d\n", rc);
+          exit(-1);
+          }
+       }
+
+    //destroy thread attr and join before deleting tree
+    pthread_attr_destroy(&attr);
+    /* Free attribute and wait for the other threads */
+    pthread_attr_destroy(&attr);
+    void* status;
+    for(int t=0; t<NUM_THREADS; t++) {
+       rc = pthread_join(thread[t], &status);
+       if (rc) {
+          printf("ERROR; return code from pthread_join() is %d\n", rc);
+          exit(-1);
+          }
+       printf("Main: completed join with thread %d having a status of %ld\n",t,(long)status);
+      }
     delete_tree(&root);
     free(root);
-
   }
-
-
-
 
   FILE * fout = fopen("result.gal", "w+");          //check succesful creation/opening of results file
     if (fout == NULL){
