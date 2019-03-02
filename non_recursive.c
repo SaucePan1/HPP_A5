@@ -11,12 +11,12 @@
 
 const double epsilon_0 = 0.001;
 
-
 //declare node structure (X)
 //maybe good idea is to compact it! (ie no padding)
 typedef struct tree_node{
   int depth;
   int body_id;
+  int is_used;
   double x_lim; //x division (middle point in x)
   double y_lim; // y division (middle point in y)
   double width; //width of the box
@@ -59,6 +59,7 @@ void create_children(node_t* node, double * pow_2){
   //create right up
   //printf("Creating RU\n");
   node->right_up=(node_t*)malloc(sizeof(node_t));
+  node->right_up->is_used = 0;
   node->right_up->depth = node->depth +1;
   node->right_up->body_id = -1;
   node->right_up->x_lim = node->x_lim + pow_2[node->right_up->depth];
@@ -76,6 +77,7 @@ void create_children(node_t* node, double * pow_2){
   //create right down
   //printf("Creating RD\n");
   node->right_down=(node_t*)malloc(sizeof(node_t));
+  node->right_down->is_used=0;
   node->right_down->depth = node->depth +1;
   node->right_down->body_id = -1;
   node->right_down->x_lim = node->x_lim + pow_2[node->right_down->depth];
@@ -94,6 +96,7 @@ void create_children(node_t* node, double * pow_2){
   //create left_up
   //printf("Creating LU\n");
   node->left_up=(node_t*)malloc(sizeof(node_t));
+  node->left_up->is_used = 0;
   node->left_up->depth = node->depth +1;
   node->left_up->body_id = -1;
   node->left_up->x_lim = node->x_lim - pow_2[node->left_up->depth];
@@ -112,6 +115,7 @@ void create_children(node_t* node, double * pow_2){
   //create left down
   //printf("Creating LD\n");
   node->left_down=(node_t*)malloc(sizeof(node_t));
+  node->left_down->is_used=0;
   node->left_down->depth = node->depth +1;
   node->left_down->body_id = -1;
   node->left_down->x_lim = node->x_lim - pow_2[node->left_down->depth];
@@ -235,6 +239,28 @@ void delete_tree(node_t** node){
   return;
 }
 
+void mark_as_not_use_tree(node_t** node){
+    if((*node)== NULL || !(*node)->is_used){return;}
+    //If you can go to a child, ie child not null
+    //go to it and call the function again
+    if((*node)->right_up && (*node)->right_up->is_used){
+      //tree has a kid which is marked as used, so we go to it
+      mark_as_not_use_tree(&(*node)->right_up);
+    }
+    if((*node)->right_down && (*node)->right_down->is_used){
+      mark_as_not_use_tree(&(*node)->right_down);
+    }
+    if((*node)->left_up && (*node)->left_up->is_used){
+      mark_as_not_use_tree(&(*node)->left_up);
+    }
+    if((*node)->left_down && (*node)->left_down->is_used){
+      mark_as_not_use_tree(&(*node)->left_down);
+    }
+    //everything is NULL or marked as not used so we can mark this node
+    //as unused
+    (*node)->is_used = 0;
+    return;
+  }
 
 typedef struct thread_arg{
   int thid;
@@ -251,6 +277,11 @@ typedef struct thread_arg{
 }arg_t;
 
 void *  worker_get_acc(void* arg){
+  /*
+  This takes as arguments the root node of the tree,
+  vector for positions and vector for velocities.
+  Performs one update step for the particles i1 to i2-1 then deletes the tree.
+  */
   arg_t* myarg = (arg_t*)arg;
   int i1 = myarg->i1;
   int i2 = myarg->i2;
@@ -260,96 +291,84 @@ void *  worker_get_acc(void* arg){
   double theta_max =myarg->theta_max;
   double total_acc_x=0;
   double total_acc_y=0;
-
-  printf("We are in worker for thread %d\n", myarg->thid);
+  //printf("We are in worker for thread %d\n", myarg->thid);
   for(int i=i1; i <i2; i ++){
     node = &root;
     //calculate forces
-    while((*node)){
+    int c=0;
+    while(root->is_used == 0){
+      c++;
+      //printf("We entered on while %d times \n",c );
+      //printf("CURRENTLY ON NODE: %d, %lf, %lf \n", (*node)->depth, (*node)->cm_x,
+      //(*node)->cm_y);
+      //print_qtree(root);
       // Look if we are on a external node.
       double x_direction = (myarg->pos_x)[i] - (*node)->cm_x;
+      //printf("x_direction : %lf \n", x_direction);
       double y_direction = (myarg->pos_y)[i] - (*node)->cm_y;
+      //printf("y_direction: %lf \n", y_direction);
       double dist_to_node = sqrt(x_direction*x_direction + y_direction*y_direction);
       double tol= 1.0e-10; //
-      if(/*(*node)->right_up == NULL &&*/ dist_to_node < tol){
-        delete_tree(node);
+      if((*node)->is_used || dist_to_node < tol || (*node)->tot_mass < 0){
+        //its the same particle or its already used
+        (*node)->is_used = 1;
         node = &root;
-      }
-      // Reminder: The only way we can have a node with one of the childs = NULL
-      // but not the others is because we deleted it already.
-      // Remember that before we only checkd if the frist node i.e RU was null,
-      //that told us if all the otherones were null or not
-      else if((*node)->width/dist_to_node > theta_max ){
-        int exp=  ((*node)->right_up!= NULL) + ((*node)->right_down!= NULL)
-        + ((*node)->left_up!= NULL) + ((*node)->left_down!= NULL);
+      }else if((*node)->right_up &&
+      (*node)->width/dist_to_node > theta_max){
+        /*its internal node, and we need to go deeper*/
+        int exp= (*node)->right_up->is_used + (*node)->right_down->is_used
+        + (*node)->left_up->is_used + (*node)->left_down->is_used;
+        //printf("exp: %d \n", exp);
         switch (exp) {
-          case 4:
-            //nothing is null so we start with right up
-            //if leaf is empty we delete it and jump to next
-            if((*node)->right_up->tot_mass < 0){
-              delete_tree(&(*node)-> right_up);
-              node = &(*node)->right_down; //we can jump to neighbouring node
-            }else{
-            node = &(*node)->right_up; //if its an internal node, we go deeper
-            }
-            break;
-          case 3:
-            if((*node)->right_down->tot_mass < 0){
-              delete_tree(&(*node)-> right_down);
-              node = &(*node)->left_up;
-            }else{
-              node = &(*node)->right_down;
-            }
-            break;
-          case 2:
-            if((*node)->left_up->tot_mass < 0){
-              delete_tree(&(*node)-> left_up);
-              node = &(*node)->left_down;
-            }else{
-              node = &(*node)->left_up;
-            }
+          case 0:
+            //no child is used so we start with right up
+            node = &(*node)->right_up;
             break;
           case 1:
-            if((*node)->left_down->tot_mass < 0){
-              delete_tree(&(*node)->left_down);
-              node = &root;
-            }else{
-              node = &(*node)->left_down;
-            }break;
-          default :
+            node = &(*node)->right_down;
+            break;
+          case 2:
+            node = &(*node)->left_up;
+            break;
+          case 3:
+            node = &(*node)->left_down;
+            break;
+          case 4:
           {
-            //every child is null so we are on a leaf
-            double denominator;
-            denominator = (dist_to_node+epsilon_0)*(dist_to_node+epsilon_0)
-            *(dist_to_node+epsilon_0);
-            //add to the global varaibles
-            total_acc_x += G* (*node)->tot_mass*x_direction/denominator;
-            total_acc_y += G* (*node)->tot_mass*y_direction/denominator;
-            delete_tree(node);
+            //every child is used so we mark current node as used and go to root
+            (*node)->is_used = 1;
             node = &root;
+            break;
           } //we need brackets to define scope since we are declaring a variable
-        }
-      }else{ // it's another leaf / it's an inner node that i can approximate
-
-        double denominator;
-        denominator = (dist_to_node+epsilon_0)*(dist_to_node+epsilon_0)*(dist_to_node+epsilon_0);
-        //add to the global varaibles
-        total_acc_x += G* (*node)->tot_mass*x_direction/denominator;
-        total_acc_y += G* (*node)->tot_mass*y_direction/denominator;
-        delete_tree(node);
-        node = &root;
-        }
+          default:
+            printf("Something went quite wrong");
       }
-      //printf("Acceleration on %d: (%lf , %lf ) \n", i+1, total_acc_x, total_acc_y);
-      myarg->vx[i] += myarg->delta_t  * total_acc_x;
-      myarg->vy[i] += myarg->delta_t  * total_acc_y;
-      myarg->pos_x[i] += myarg->delta_t * myarg->vx[i];
-      myarg->pos_y[i] += myarg->delta_t * myarg->vy[i];
-      total_acc_x=0;
-      total_acc_y=0;
+    }else{
+      double denominator = (dist_to_node+epsilon_0)*(dist_to_node+epsilon_0)*(dist_to_node+epsilon_0);
+      //add to the global varaibles
+      total_acc_x += G* (*node)->tot_mass*x_direction/denominator;
+      total_acc_y += G* (*node)->tot_mass*y_direction/denominator;
+      (*node)->is_used = 1;
+      node = &root;
     }
-    pthread_exit((void*) myarg->thid);
   }
+  printf("Updating postion for particle %d, in thread %d \n", i, myarg->thid);
+  //printf("Acceleration on %d: (%lf , %lf ) \n", i+1, total_acc_x, total_acc_y);
+  myarg->vx[i] += myarg->delta_t  * total_acc_x;
+  myarg->vy[i] += myarg->delta_t  * total_acc_y;
+  myarg->pos_x[i] += myarg->delta_t * myarg->vx[i];
+  myarg->pos_y[i] += myarg->delta_t * myarg->vy[i];
+  printf("pos: (%lf, %lf) \n", myarg->pos_x[i], myarg->pos_y[i]);
+  //set acceleration to 0 and mark the tree as not used
+  //once again for the next particle
+  total_acc_x=0;
+  total_acc_y=0;
+  mark_as_not_use_tree(&root);
+}
+//we are done with the tree so we delete it.
+delete_tree(&root);
+pthread_exit((void*) myarg->thid);
+}
 
 int main(int argc, char *args[]){
   if (argc!=8){
@@ -423,25 +442,39 @@ int main(int argc, char *args[]){
   //print_qtree(root);
 
   for (int k = 0 ; k<n_steps ; k++){
-    node_t * root= (node_t*)malloc(sizeof(node_t));
-    root->depth = 1;
-    root->x_lim = 0.5;
-    root->y_lim = 0.5;
-    root->width = 0.5;
-    root->tot_mass = -1.0;
-    root->left_down = NULL;
-    root->left_up = NULL;
-    root->right_up=NULL;
-    root->right_down=NULL;
-    printf("Created root ...\n");
-    int id_tar;
-    //Create tree for step K
-    for(int i=0; i<N; i++){
-      id_tar = i;
-      insert(&root ,pos_x[i], pos_y[i], ma[i], pow_2, id_tar);
+    printf("We are on step %d\n", k);
+    //create as many trees as threads
+    printf("Allocating mem for root \n");
+    node_t** trees_root = (node_t**)malloc(sizeof(node_t*)*NUM_THREADS);
+    for(int i=0; i< NUM_THREADS; i++){
+      node_t* root = (node_t*)malloc(sizeof(node_t));
+      root->depth = 1;
+      root->body_id = i;
+      root->x_lim = 0.5;
+      root->y_lim = 0.5;
+      root->width = 0.5;
+      root->tot_mass = -1.0;
+      root->left_down = NULL;
+      root->left_up = NULL;
+      root->right_up=NULL;
+      root->right_down=NULL;
+      trees_root[i] = root;
+      printf("Created root %d ... \n", i);
     }
-
-    printf("Inserted nodes ...\n");
+    /// CHECKING IF ITS OK
+    for(int t = 0; t< NUM_THREADS; t++){
+      printf("Root %d, depth: %d, %lf. Pls be different: %d\n", t, trees_root[t]->depth,
+      trees_root[t]->x_lim, trees_root[t]->body_id );
+    }
+    int id_tar;
+    //Create the trees for step K
+    for(int j =0; j < NUM_THREADS; j++){
+      for(int i=0; i<N; i++){
+        id_tar = i;
+        insert(&(trees_root[j]),pos_x[i], pos_y[i], ma[i], pow_2, id_tar);
+      }
+    }
+    //printf("Inserted nodes ...\n");
     //Start threads
     int rc;
     int t;
@@ -451,7 +484,7 @@ int main(int argc, char *args[]){
     pthread_attr_init(&attr); //initializes thread attributes with default values
     pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_JOINABLE); //set it to detached
 
-    printf("ceating threads \n");
+    //printf("ceating threads \n");
     for(t=0; t<NUM_THREADS; t++) {
        printf("Main: creating thread %d\n", t);
        //prepare thread arguments
@@ -466,13 +499,13 @@ int main(int argc, char *args[]){
        thread_arg->pos_y = &pos_y[0];
        thread_arg->vx = &vel_x[0];
        thread_arg->vy= &vel_y[0];
-       thread_arg->node = root;
+       thread_arg->node = trees_root[t];
        rc = pthread_create(&thread[t], &attr, worker_get_acc, thread_arg);
        if (rc) {
-          printf("ERROR; return code from pthread_create() is %d\n", rc);
-          exit(-1);
-          }
-       }
+        printf("ERROR; return code from pthread_create() is %d\n", rc);
+        exit(-1);
+        }
+    }
 
     // MAIN CAN TAKE CARE OF THE REST. (calling worker again)
     //destroy thread attr and join before deleting tree
@@ -486,6 +519,8 @@ int main(int argc, char *args[]){
           }
        printf("Main: completed join with thread %d having a status of %ld\n",t,(long)status);
       }
+    //delete trees THIS IS probably better to put it on the worker function for each
+    //thread
   }
 
   FILE * fout = fopen("result.gal", "w+");          //check succesful creation/opening of results file
@@ -520,14 +555,6 @@ fclose(fout);
   free(vel_y);
   free(ma);
   free(bri);
-  /*
-  clock_t end = clock();
-  double time_spent = (double)(end - begin)/CLOCKS_PER_SEC;
 
-  FILE *file3;
-  file3 = fopen("time.txt" , "a+");
-  fprintf(file3 , "%lf \n" , time_spent );
-  fclose(file3);
-*/
   return 0;
 }
