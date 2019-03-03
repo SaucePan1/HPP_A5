@@ -461,21 +461,7 @@ int main(int argc, char *args[]){
       root->right_up=NULL;
       root->right_down=NULL;
       trees_root[i] = root;
-      //printf("Created root %d ... \n", i);
 
-    /*  int depth;
-      int body_id;
-      int is_used;
-      double x_lim; //x division (middle point in x)
-      double y_lim; // y division (middle point in y)
-      double width; //width of the box
-      double cm_x; // = 0, this points to 0 and
-      double cm_y; //center of mas s of the quadrant
-      double tot_mass; // = 0, total mass of the quadrant
-      struct tree_node *left_down; //Q3 child
-      struct tree_node *left_up; //Q2 child
-      struct tree_node *right_down; //Q4 child
-      struct tree_node *right_up; //Q1 child*/
     }
     /// CHECKING IF ITS OK
     arg_t* arg_thread = (arg_t*)malloc(NUM_THREADS*sizeof(arg_t));
@@ -485,6 +471,7 @@ int main(int argc, char *args[]){
     }
     int id_tar;
     //Create the trees for step K
+    //hola wtf?
     for(int j =0; j < NUM_THREADS; j++){
       for(int i=0; i<N; i++){
         id_tar = i;
