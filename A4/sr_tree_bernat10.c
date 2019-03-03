@@ -352,14 +352,20 @@ int main(int argc, char *args[]){
       id_tar = i;
       insert(&root ,arr[i][POS_X], arr[i][POS_Y], ma[i], pow_2, id_tar);
     }
+    
     for(int i=0; i <N; i ++){
       get_acc_on_body(arr[i][0], arr[i][1], &root, theta_max, G);
-      
-    //  printf("Acceleration on %d: (%lf , %lf ) \n", i+1, total_acc_x, total_acc_y);
+
+    //  printf("Acceleration on %d: (%lf , %lf ) \n", i+1, total_acc_x, total_acc_y)
+      printf("pos: (%lf, %lf) \n", arr[i][0], arr[i][0]);
       arr[i][2] += delta_t  * total_acc_x;
       arr[i][3] += delta_t  * total_acc_y;
       arr[i][0] += delta_t * arr[i][2];
       arr[i][1] += delta_t * arr[i][3];
+      printf("total_acc: (%lf, %lf) \n", total_acc_x, total_acc_y);
+      printf("Updated: \n");
+      printf("pos: (%lf, %lf) \n", arr[i][0], arr[i][0]);
+
       total_acc_x=0;
       total_acc_y=0;
     }

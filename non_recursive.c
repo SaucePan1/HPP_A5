@@ -291,17 +291,18 @@ void *  worker_get_acc(void* arg){
   double theta_max =myarg->theta_max;
   double total_acc_x=0;
   double total_acc_y=0;
-  //printf("We are in worker for thread %d\n", myarg->thid);
+  printf("We are in worker for thread %d\n", myarg->thid);
+  printf("We are using the following tree for thread %d \n", myarg->thid);
+  print_qtree(root);
   for(int i=i1; i <i2; i ++){
     node = &root;
     //calculate forces
     int c=0;
     while(root->is_used == 0){
       c++;
-      //printf("We entered on while %d times \n",c );
-      //printf("CURRENTLY ON NODE: %d, %lf, %lf \n", (*node)->depth, (*node)->cm_x,
-      //(*node)->cm_y);
-      //print_qtree(root);
+      printf("We entered on while %d times \n",c );
+      printf("CURRENTLY ON NODE: %d, %lf, %lf \n", (*node)->depth, (*node)->cm_x,
+      (*node)->cm_y);
       // Look if we are on a external node.
       double x_direction = (myarg->pos_x)[i] - (*node)->cm_x;
       //printf("x_direction : %lf \n", x_direction);
@@ -353,12 +354,16 @@ void *  worker_get_acc(void* arg){
     }
   }
   printf("Updating postion for particle %d, in thread %d \n", i, myarg->thid);
+  printf(" pos: (%lf, %lf) \n", myarg->pos_x[i], myarg->pos_y[i]);
+  printf("total_acc: (%lf, %lf)", total_acc_x, total_acc_y);
   //printf("Acceleration on %d: (%lf , %lf ) \n", i+1, total_acc_x, total_acc_y);
   myarg->vx[i] += myarg->delta_t  * total_acc_x;
   myarg->vy[i] += myarg->delta_t  * total_acc_y;
   myarg->pos_x[i] += myarg->delta_t * myarg->vx[i];
   myarg->pos_y[i] += myarg->delta_t * myarg->vy[i];
-  printf("pos: (%lf, %lf) \n", myarg->pos_x[i], myarg->pos_y[i]);
+
+  printf("Updated: \n");
+  printf(" pos: (%lf, %lf) \n", myarg->pos_x[i], myarg->pos_y[i]);
   //set acceleration to 0 and mark the tree as not used
   //once again for the next particle
   total_acc_x=0;
@@ -473,6 +478,8 @@ int main(int argc, char *args[]){
         id_tar = i;
         insert(&(trees_root[j]),pos_x[i], pos_y[i], ma[i], pow_2, id_tar);
       }
+      printf("*** Printing Tree %d ***\n", j);
+      print_qtree(trees_root[j]);
     }
     //printf("Inserted nodes ...\n");
     //Start threads
