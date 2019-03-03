@@ -4,6 +4,7 @@
 #include <time.h>
 #include <math.h>
 #include <pthread.h>
+#include <stdint.h>
 
 #define POS_X  0
 #define POS_Y 1
@@ -291,18 +292,17 @@ void *  worker_get_acc(void* arg){
   double theta_max =myarg->theta_max;
   double total_acc_x=0;
   double total_acc_y=0;
-  printf("We are in worker for thread %d\n", myarg->thid);
-  printf("We are using the following tree for thread %d \n", myarg->thid);
-  print_qtree(root);
+  //printf("We are in worker for thread %d\n", myarg->thid);
   for(int i=i1; i <i2; i ++){
     node = &root;
     //calculate forces
     int c=0;
     while(root->is_used == 0){
       c++;
-      printf("We entered on while %d times \n",c );
-      printf("CURRENTLY ON NODE: %d, %lf, %lf \n", (*node)->depth, (*node)->cm_x,
-      (*node)->cm_y);
+      //printf("We entered on while %d times \n",c );
+      //printf("CURRENTLY ON NODE: %d, %lf, %lf \n", (*node)->depth, (*node)->cm_x,
+      //(*node)->cm_y);
+      //print_qtree(root);
       // Look if we are on a external node.
       double x_direction = (myarg->pos_x)[i] - (*node)->cm_x;
       //printf("x_direction : %lf \n", x_direction);
@@ -353,17 +353,13 @@ void *  worker_get_acc(void* arg){
       node = &root;
     }
   }
-  printf("Updating postion for particle %d, in thread %d \n", i, myarg->thid);
-  printf(" pos: (%lf, %lf) \n", myarg->pos_x[i], myarg->pos_y[i]);
-  printf("total_acc: (%lf, %lf)", total_acc_x, total_acc_y);
+  //printf("Updating postion for particle %d, in thread %d \n", i, myarg->thid);
   //printf("Acceleration on %d: (%lf , %lf ) \n", i+1, total_acc_x, total_acc_y);
   myarg->vx[i] += myarg->delta_t  * total_acc_x;
   myarg->vy[i] += myarg->delta_t  * total_acc_y;
   myarg->pos_x[i] += myarg->delta_t * myarg->vx[i];
   myarg->pos_y[i] += myarg->delta_t * myarg->vy[i];
-
-  printf("Updated: \n");
-  printf(" pos: (%lf, %lf) \n", myarg->pos_x[i], myarg->pos_y[i]);
+  //printf("pos: (%lf, %lf) \n", myarg->pos_x[i], myarg->pos_y[i]);
   //set acceleration to 0 and mark the tree as not used
   //once again for the next particle
   total_acc_x=0;
@@ -372,7 +368,7 @@ void *  worker_get_acc(void* arg){
 }
 //we are done with the tree so we delete it.
 delete_tree(&root);
-pthread_exit((void*) myarg->thid);
+//pthread_exit((void*) (intptr_t) myarg->thid);
 }
 
 int main(int argc, char *args[]){
@@ -447,9 +443,9 @@ int main(int argc, char *args[]){
   //print_qtree(root);
 
   for (int k = 0 ; k<n_steps ; k++){
-    printf("We are on step %d\n", k);
+    //printf("We are on step %d\n", k);
     //create as many trees as threads
-    printf("Allocating mem for root \n");
+    //printf("Allocating mem for root \n");
     node_t** trees_root = (node_t**)malloc(sizeof(node_t*)*NUM_THREADS);
     for(int i=0; i< NUM_THREADS; i++){
       node_t* root = (node_t*)malloc(sizeof(node_t));
@@ -457,6 +453,7 @@ int main(int argc, char *args[]){
       root->body_id = i;
       root->x_lim = 0.5;
       root->y_lim = 0.5;
+      root->is_used = 0;
       root->width = 0.5;
       root->tot_mass = -1.0;
       root->left_down = NULL;
@@ -464,9 +461,24 @@ int main(int argc, char *args[]){
       root->right_up=NULL;
       root->right_down=NULL;
       trees_root[i] = root;
-      printf("Created root %d ... \n", i);
+      //printf("Created root %d ... \n", i);
+
+    /*  int depth;
+      int body_id;
+      int is_used;
+      double x_lim; //x division (middle point in x)
+      double y_lim; // y division (middle point in y)
+      double width; //width of the box
+      double cm_x; // = 0, this points to 0 and
+      double cm_y; //center of mas s of the quadrant
+      double tot_mass; // = 0, total mass of the quadrant
+      struct tree_node *left_down; //Q3 child
+      struct tree_node *left_up; //Q2 child
+      struct tree_node *right_down; //Q4 child
+      struct tree_node *right_up; //Q1 child*/
     }
     /// CHECKING IF ITS OK
+    arg_t* arg_thread = (arg_t*)malloc(NUM_THREADS*sizeof(arg_t));
     for(int t = 0; t< NUM_THREADS; t++){
       printf("Root %d, depth: %d, %lf. Pls be different: %d\n", t, trees_root[t]->depth,
       trees_root[t]->x_lim, trees_root[t]->body_id );
@@ -478,14 +490,14 @@ int main(int argc, char *args[]){
         id_tar = i;
         insert(&(trees_root[j]),pos_x[i], pos_y[i], ma[i], pow_2, id_tar);
       }
-      printf("*** Printing Tree %d ***\n", j);
-      print_qtree(trees_root[j]);
     }
     //printf("Inserted nodes ...\n");
     //Start threads
     int rc;
     int t;
-    pthread_t thread[NUM_THREADS];
+
+    pthread_t *thread = (pthread_t*)malloc(sizeof(pthread_t)*NUM_THREADS);
+
     pthread_attr_t attr;
     /* Initialize thread attr and set to JOINABLE*/
     pthread_attr_init(&attr); //initializes thread attributes with default values
@@ -495,7 +507,7 @@ int main(int argc, char *args[]){
     for(t=0; t<NUM_THREADS; t++) {
        printf("Main: creating thread %d\n", t);
        //prepare thread arguments
-       arg_t* thread_arg = (arg_t*)malloc(sizeof(arg_t));
+       arg_t* thread_arg = &arg_thread[t];
        thread_arg->thid = t;
        thread_arg->i1 = N/NUM_THREADS*t;
        thread_arg->i2 = N/NUM_THREADS*(t+1);
@@ -508,11 +520,14 @@ int main(int argc, char *args[]){
        thread_arg->vy= &vel_y[0];
        thread_arg->node = trees_root[t];
        rc = pthread_create(&thread[t], &attr, worker_get_acc, thread_arg);
-       if (rc) {
+       /*if (rc) {
         printf("ERROR; return code from pthread_create() is %d\n", rc);
         exit(-1);
-        }
+      }*/
+
     }
+    //free(arg_thread);
+
 
     // MAIN CAN TAKE CARE OF THE REST. (calling worker again)
     //destroy thread attr and join before deleting tree
@@ -521,13 +536,16 @@ int main(int argc, char *args[]){
     for(int t=0; t<NUM_THREADS; t++) {
        rc = pthread_join(thread[t], &status);
        if (rc) {
-          printf("ERROR; return code from pthread_join() is %d\n", rc);
+          //printf("ERROR; return code from pthread_join() is %d\n", rc);
           exit(-1);
           }
-       printf("Main: completed join with thread %d having a status of %ld\n",t,(long)status);
+      // printf("Main: completed join with thread %d having a status of %ld\n",t,(long)status);
       }
     //delete trees THIS IS probably better to put it on the worker function for each
     //thread
+    free(thread);
+    free(trees_root);
+    free(arg_thread);
   }
 
   FILE * fout = fopen("result.gal", "w+");          //check succesful creation/opening of results file
@@ -562,6 +580,7 @@ fclose(fout);
   free(vel_y);
   free(ma);
   free(bri);
+
 
   return 0;
 }
