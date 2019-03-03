@@ -446,8 +446,9 @@ int main(int argc, char *args[]){
     //printf("We are on step %d\n", k);
     //create as many trees as threads
     //printf("Allocating mem for root \n");
-    node_t** trees_root = (node_t**)malloc(sizeof(node_t*)*NUM_THREADS);
-    for(int i=0; i< NUM_THREADS; i++){
+    //Create one extra root for main
+    node_t** trees_root = (node_t**)malloc(sizeof(node_t*)*(NUM_THREADS+1));
+    for(int i=0; i< NUM_THREADS +1; i++){
       node_t* root = (node_t*)malloc(sizeof(node_t));
       root->depth = 1;
       root->body_id = i;
@@ -461,43 +462,31 @@ int main(int argc, char *args[]){
       root->right_up=NULL;
       root->right_down=NULL;
       trees_root[i] = root;
-      //printf("Created root %d ... \n", i);
-
-    /*  int depth;
-      int body_id;
-      int is_used;
-      double x_lim; //x division (middle point in x)
-      double y_lim; // y division (middle point in y)
-      double width; //width of the box
-      double cm_x; // = 0, this points to 0 and
-      double cm_y; //center of mas s of the quadrant
-      double tot_mass; // = 0, total mass of the quadrant
-      struct tree_node *left_down; //Q3 child
-      struct tree_node *left_up; //Q2 child
-      struct tree_node *right_down; //Q4 child
-      struct tree_node *right_up; //Q1 child*/
     }
+    printf("Created trees ..\n");
     /// CHECKING IF ITS OK
-    arg_t* arg_thread = (arg_t*)malloc(NUM_THREADS*sizeof(arg_t));
+    arg_t* arg_thread = (arg_t*)malloc((NUM_THREADS+1)*sizeof(arg_t));
     for(int t = 0; t< NUM_THREADS; t++){
       printf("Root %d, depth: %d, %lf. Pls be different: %d\n", t, trees_root[t]->depth,
       trees_root[t]->x_lim, trees_root[t]->body_id );
     }
     int id_tar;
     //Create the trees for step K
-    for(int j =0; j < NUM_THREADS; j++){
+    //hola wtf?
+    //Create one extra tree for main
+    for(int j =0; j < NUM_THREADS +1; j++){
       for(int i=0; i<N; i++){
         id_tar = i;
         insert(&(trees_root[j]),pos_x[i], pos_y[i], ma[i], pow_2, id_tar);
       }
     }
-    //printf("Inserted nodes ...\n");
+
+    printf("Inserted nodes ...\n");
     //Start threads
     int rc;
     int t;
 
     pthread_t *thread = (pthread_t*)malloc(sizeof(pthread_t)*NUM_THREADS);
-
     pthread_attr_t attr;
     /* Initialize thread attr and set to JOINABLE*/
     pthread_attr_init(&attr); //initializes thread attributes with default values
@@ -526,9 +515,22 @@ int main(int argc, char *args[]){
       }*/
 
     }
-    //free(arg_thread);
-
-
+    //Use main for the rest,
+    // Use main for the rest!
+    printf("i2 in main is: %d\n", arg_thread[NUM_THREADS-1].i2);
+    arg_t* thread_arg_main = &arg_thread[NUM_THREADS];
+    thread_arg_main->thid = NUM_THREADS;
+    thread_arg_main->i1 = arg_thread[NUM_THREADS-1].i2;
+    thread_arg_main->i2 = N;
+    thread_arg_main->theta_max = theta_max;
+    thread_arg_main->G = G;
+    thread_arg_main->delta_t = delta_t;
+    thread_arg_main->pos_x = &pos_x[0];
+    thread_arg_main->pos_y = &pos_y[0];
+    thread_arg_main->vx = &vel_x[0];
+    thread_arg_main->vy= &vel_y[0];
+    thread_arg_main->node = trees_root[NUM_THREADS];
+    worker_get_acc((void*)thread_arg_main);
     // MAIN CAN TAKE CARE OF THE REST. (calling worker again)
     //destroy thread attr and join before deleting tree
     pthread_attr_destroy(&attr);
